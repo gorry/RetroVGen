@@ -41,7 +41,7 @@ const byte hPinSW4 = 9;
 const byte cScreenFontWidth = 8;
 const byte cScreenFontHeight = 8;
 
-const byte cScreenWidth = 40;
+const byte cScreenWidth = 56;
 const byte cScreenHeight = 32;
 char sScreenBuffer[cScreenHeight][cScreenWidth];
 

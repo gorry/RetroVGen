@@ -61,7 +61,7 @@ PROGMEM static const ScreenParam sScreenParam[16] = {
 		"15.98kHz/61.94Hz",
 	},
 	{
-		 40,	// Horizontal Chars
+		 50,	// Horizontal Chars
 		 32,	// Vertical Chars
 		  0,	// Line Doubler
 		  0,
@@ -174,7 +174,7 @@ PROGMEM static const ScreenParam sScreenParam[16] = {
 		"15.98kHz/61.94Hz",
 	},
 	{
-		 40,	// Horizontal Chars
+		 50,	// Horizontal Chars
 		 32,	// Vertical Chars
 		  0,	// Line Doubler
 		  0,
