@@ -51,6 +51,7 @@ uint16_t sVSyncStartLine;
 uint16_t sVSyncEndLine;
 
 volatile int16_t vLine;
+volatile int8_t vVsyncCount;
 
 //==============================================================
 // initialize
@@ -104,11 +105,23 @@ void setup()
 		memcpy(&sScreenBuffer[1+((sScr->mVerticalChars-windowh)>>1)][0+((sScr->mHorizontalChars-windoww)>>1)], sScr->mMsg2, windoww);
 	}
 
+	// vsync counter print
+	{
+		const byte windoww = 4;
+		const byte windowh = 3;
+		for (byte y=0; y<windowh; y++) {
+			char* p = &sScreenBuffer[5+y+((sScr->mVerticalChars-windowh)>>1)][((sScr->mHorizontalChars-windoww)>>1)];
+			memset(p, ' ', windoww);
+		}
+	}
+	vVsyncCount = 0;
+
 	// disable Timer 0
 	TIMSK0 = 0;						// no interrupts on Timer 0
 	OCR0A = 0;						// and turn it off
 	OCR0B = 0;
-	// Timer 1 - horizontal sync pulses
+
+	// Timer 1 - horizontal sync pulses
 	// Interrupt: TIMER1_OVF_vect
 	pinMode(hPinHSync, OUTPUT);
 	Timer1::setMode(15, Timer1::PRESCALE_1, Timer1::CLEAR_B_ON_COMPARE);
@@ -152,6 +165,12 @@ void doOneScanLine()
 	if (vLine >= sVDispEndLine) {
 		if (vLine == sVSyncStartLine) {
 			digitalWrite(hPinVSync, 0);
+			vVsyncCount = (vVsyncCount+1)%100;
+			const byte windoww = 4;
+			const byte windowh = 3;
+			char* p = &sScreenBuffer[6+((sScr->mVerticalChars-windowh)>>1)][1+((sScr->mHorizontalChars-windoww)>>1)];
+			*(p++) = (vVsyncCount/10)+'0';
+			*(p++) = (vVsyncCount%10)+'0';
 		} else if (vLine == sVSyncEndLine) {
 			digitalWrite(hPinVSync, 1);
 		}
@@ -196,7 +215,8 @@ void doOneScanLine()
 
 }	// end of doOneScanLine
 
-//==============================================================
+
+//==============================================================
 // called by interrupt service routine when incoming data arrives
 //==============================================================
 
