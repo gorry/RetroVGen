@@ -1,21 +1,22 @@
 /*
-  "RetroVGen" : Retro RGB Video Signal Generator
-  Hiroaki GOTO as GORRY / http://GORRY.hauN.org/
-  2019/01/05 Version 1.0
+	"RetroVGen" : Retro RGB Video Signal Generator
+	Hiroaki GOTO as GORRY / http://GORRY.hauN.org/
+	2020/03/22 Version 20200322a
 */
 
 /*
- Connections:
- 
- D1  : Pixel output (150 ohms in series to each one of R, G, B)   --> Pins 1, 2, 3 on DB15 socket
- D3  : Vertical Sync (68 ohms in series) --> Pin 14 on DB15 socket
- D9  : mode sw 4
- D10 : Horizontal Sync (68 ohms in series) --> Pin 13 on DB15 socket
- D11 : mode sw 1
- D12 : mode sw 2
- D13 : mode sw 3
- 
- Gnd : --> Pins 5, 6, 7, 8, 10 on DB15 socket
+	Connections:
+
+	D1	: Pixel output (150 ohms in series to each one of R, G, B)	 --> Pins 1, 2, 3 on DB15 socket
+	D3	: Vertical Sync (68 ohms in series) --> Pin 14 on DB15 socket
+	D8	: LED Flash sync with VSYNC
+	D9	: mode sw 4
+	D10 : Horizontal Sync (68 ohms in series) --> Pin 13 on DB15 socket
+	D11 : mode sw 1
+	D12 : mode sw 2
+	D13 : mode sw 3
+
+	Gnd : --> Pins 5, 6, 7, 8, 10 on DB15 socket
 */
 
 #include "TimerHelpers.h"
@@ -37,13 +38,14 @@ const byte hPinSW1 = 11;
 const byte hPinSW2 = 12;
 const byte hPinSW3 = 13;
 const byte hPinSW4 = 9;
+const byte hPinLED = 8;
 
 const byte cScreenFontWidth = 8;
 const byte cScreenFontHeight = 8;
 
 const byte cScreenWidth = 56;
 const byte cScreenHeight = 32;
-char sScreenBuffer[cScreenHeight][cScreenWidth];
+byte sScreenBuffer[cScreenHeight][cScreenWidth];
 
 const ScreenParam* sScr;
 uint16_t sVDispEndLine;
@@ -61,11 +63,11 @@ void setup()
 {
 	ScreenParam screenParam;
 
-	vLine = 0; 
+	vLine = 0;
 
 	// initial screen
-	for (byte y=0; y<cScreenHeight; y++) {
-		for (byte x=0; x<cScreenWidth; x++) {
+	for (byte y = 0; y < cScreenHeight; y++) {
+		for (byte x = 0; x < cScreenWidth; x++) {
 			byte n = x;
 			if (n < y) n = y;
 			n = n % 10;
@@ -79,10 +81,10 @@ void setup()
 	pinMode(hPinSW3, INPUT_PULLUP);
 	pinMode(hPinSW4, INPUT_PULLUP);
 	int modesw =
-	  (digitalRead(hPinSW1) ? 0 : 1) |
-	  (digitalRead(hPinSW2) ? 0 : 2) |
-	  (digitalRead(hPinSW3) ? 0 : 4) |
-	  (digitalRead(hPinSW4) ? 0 : 8);
+		(digitalRead(hPinSW1) ? 0 : 1) |
+		(digitalRead(hPinSW2) ? 0 : 2) |
+		(digitalRead(hPinSW3) ? 0 : 4) |
+		(digitalRead(hPinSW4) ? 0 : 8);
 	memcpy_P(&screenParam, &sScreenParam[modesw], sizeof(screenParam));
 	sScr = &screenParam;
 	sVSyncEndLine = sScr->mVerticalTotalLines - sScr->mVerticalBackPorch;
@@ -93,28 +95,37 @@ void setup()
 	{
 		const byte windoww = 18;
 		const byte windowh = 4;
-		for (byte y=0; y<windowh; y++) {
-			char* p = &sScreenBuffer[y+((sScr->mVerticalChars-windowh)>>1)][((sScr->mHorizontalChars-windoww)>>1)];
+		for (byte y = 0; y < windowh; y++) {
+			byte* p = &sScreenBuffer[y + ((sScr->mVerticalChars - windowh) >> 1)][((sScr->mHorizontalChars - windoww) >> 1)];
 			memset(p, ' ', windoww);
 		}
 	}
 	{
 		const int windoww = 16;
 		const int windowh = 2;
-		memcpy(&sScreenBuffer[0+((sScr->mVerticalChars-windowh)>>1)][0+((sScr->mHorizontalChars-windoww)>>1)], sScr->mMsg1, windoww);
-		memcpy(&sScreenBuffer[1+((sScr->mVerticalChars-windowh)>>1)][0+((sScr->mHorizontalChars-windoww)>>1)], sScr->mMsg2, windoww);
+		memcpy(&sScreenBuffer[0 + ((sScr->mVerticalChars - windowh) >> 1)][0 + ((sScr->mHorizontalChars - windoww) >> 1)], sScr->mMsg1, windoww);
+		memcpy(&sScreenBuffer[1 + ((sScr->mVerticalChars - windowh) >> 1)][0 + ((sScr->mHorizontalChars - windoww) >> 1)], sScr->mMsg2, windoww);
 	}
 
 	// vsync counter print
 	{
 		const byte windoww = 4;
 		const byte windowh = 3;
-		for (byte y=0; y<windowh; y++) {
-			char* p = &sScreenBuffer[5+y+((sScr->mVerticalChars-windowh)>>1)][((sScr->mHorizontalChars-windoww)>>1)];
+		for (byte y = 0; y < windowh; y++) {
+			byte* p = &sScreenBuffer[5 + y + ((sScr->mVerticalChars - windowh) >> 1)][((sScr->mHorizontalChars - windoww) >> 1)];
 			memset(p, ' ', windoww);
 		}
+		{
+			byte* p = &sScreenBuffer[6 + ((sScr->mVerticalChars - windowh) >> 1)][0 + ((sScr->mHorizontalChars - windoww) >> 1)];
+			*(p++) = 0xff;
+			*(p++) = (vVsyncCount / 10) + '0';
+			*(p++) = (vVsyncCount % 10) + '0';
+			*(p++) = 0xff;
+		}
 	}
+
 	vVsyncCount = 0;
+	pinMode(hPinLED, OUTPUT);
 
 	// disable Timer 0
 	TIMSK0 = 0;						// no interrupts on Timer 0
@@ -145,7 +156,7 @@ void setup()
 	UCSR0B = 0;
 	UCSR0C = _BV(UMSEL00) | _BV(UMSEL01) | _BV(UCPHA0) | _BV(UCPOL0);	// Master SPI mode
 
-	// prepare to sleep between horizontal sync pulses  
+	// prepare to sleep between horizontal sync pulses
 	set_sleep_mode(SLEEP_MODE_IDLE);
 }
 
@@ -159,18 +170,12 @@ void doOneScanLine()
 	register byte i;
 	register uint16_t l;
 	const register byte* linePtr;
-	register char* p;
+	register byte* p;
 
 	// VBack Porch
 	if (vLine >= sVDispEndLine) {
 		if (vLine == sVSyncStartLine) {
 			digitalWrite(hPinVSync, 0);
-			vVsyncCount = (vVsyncCount+1)%100;
-			const byte windoww = 4;
-			const byte windowh = 3;
-			char* p = &sScreenBuffer[6+((sScr->mVerticalChars-windowh)>>1)][1+((sScr->mHorizontalChars-windoww)>>1)];
-			*(p++) = (vVsyncCount/10)+'0';
-			*(p++) = (vVsyncCount%10)+'0';
 		} else if (vLine == sVSyncEndLine) {
 			digitalWrite(hPinVSync, 1);
 		}
@@ -180,9 +185,10 @@ void doOneScanLine()
 	// pre-load pointer for speed
 	l = (vLine >> sScr->mLineDoubler);
 	linePtr = &screen_font[l & 0x07][0];
-	p = &(sScreenBuffer[l >> 3][0]);
+	l >>= 3;
+	p = &(sScreenBuffer[l][0]);
 
-	if ((l >> 3) >= sScr->mVerticalChars) {
+	if (l >= sScr->mVerticalChars) {
 		goto next;
 	}
 
@@ -193,9 +199,13 @@ void doOneScanLine()
 	i = sScr->mHorizontalChars;
 
 	// blit pixel data to screen
-	while (i--) {
-		UDR0 = pgm_read_byte(linePtr + (*p++));
-	}
+	do {
+		register byte* q = linePtr + (*p);
+		register byte c = pgm_read_byte(q);
+		UDR0 = c;
+		(void)pgm_read_byte(q);	// wait
+		p++;
+	} while (--i);
 
 	// wait till done
 	while (!(UCSR0A & _BV(TXC0))) {
@@ -206,10 +216,22 @@ void doOneScanLine()
 	UCSR0B = 0;		// drop back to black
 
 	// Next Line
-  next:;
+next:;
 	vLine++;
 	if (vLine >= sScr->mVerticalTotalLines) {
 		vLine = 0;
+		vVsyncCount = (vVsyncCount + 1) % 60;
+		byte c = ((vVsyncCount >= 4) ? ' ' : 0xff);
+		{
+			const byte windoww = 4;
+			const byte windowh = 3;
+			byte* p = &sScreenBuffer[6 + ((sScr->mVerticalChars - windowh) >> 1)][0 + ((sScr->mHorizontalChars - windoww) >> 1)];
+			*(p++) = c;
+			*(p++) = (vVsyncCount / 10) + '0';
+			*(p++) = (vVsyncCount % 10) + '0';
+			*(p++) = c;
+		}
+		digitalWrite(hPinLED, (c != ' '));
 	}
 
 

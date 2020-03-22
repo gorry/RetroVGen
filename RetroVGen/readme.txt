@@ -75,6 +75,10 @@ https://www.suigyodo.com/online/schsoft.htm
   VSYNC信号となります。
   68Ω抵抗を経由して、VGAコネクタ14pへ接続します。
 
+・D8
+  VSYNCカウンタ0～3の間、点灯します。
+  画面表示と比べることで、表示遅延を確認することができます。
+
 ・D10
   OC1によるFast PWM出力を利用して、HSYNC信号を模倣します。
   68Ω抵抗を経由して、VGAコネクタ13pへ接続します。
