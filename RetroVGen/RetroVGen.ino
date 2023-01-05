@@ -1,7 +1,7 @@
 /*
 	"RetroVGen" : Retro RGB Video Signal Generator
 	Hiroaki GOTO as GORRY / http://GORRY.hauN.org/
-	2020/03/22 Version 20200322a
+	2023/01/05 Version 20230105a
 */
 
 /*
@@ -43,17 +43,22 @@ const byte hPinLED = 8;
 const byte cScreenFontWidth = 8;
 const byte cScreenFontHeight = 8;
 
-const byte cScreenWidth = 56;
+const byte cScreenWidth = 50;
 const byte cScreenHeight = 32;
 byte sScreenBuffer[cScreenHeight][cScreenWidth];
 
 const ScreenParam* sScr;
-uint16_t sVDispEndLine;
-uint16_t sVSyncStartLine;
-uint16_t sVSyncEndLine;
+
+int16_t sVDispLines;
+int16_t sVDispBlankLines;
 
 volatile int16_t vLine;
-volatile int8_t vVsyncCount;
+volatile int8_t vVsyncCount1;
+volatile int8_t vVsyncCount2;
+volatile byte vHsyncMode;
+volatile int16_t vHsyncCount;
+volatile byte *vScreenBufferPtr;
+volatile const byte* vScreenFontLine;
 
 //==============================================================
 // initialize
@@ -87,9 +92,20 @@ void setup()
 		(digitalRead(hPinSW4) ? 0 : 8);
 	memcpy_P(&screenParam, &sScreenParam[modesw], sizeof(screenParam));
 	sScr = &screenParam;
-	sVSyncEndLine = sScr->mVerticalTotalLines - sScr->mVerticalBackPorch;
-	sVSyncStartLine = sVSyncEndLine - sScr->mVerticalSyncLines;
-	sVDispEndLine = sVSyncStartLine - sScr->mVerticalFrontPorch;
+
+	vHsyncMode = 0;
+	vVsyncCount1 = 0;
+	vVsyncCount2 = 0;
+
+	// Calc Disp Lines and Disp Blank Lines
+	{
+		int16_t lines = sScr->mVerticalTotalLines - sScr->mVerticalSyncLines - sScr->mVerticalFrontPorch - sScr->mVerticalBackPorch;
+		int16_t displines = sScr->mVerticalChars * (8 << sScr->mLineDoubler);
+		sVDispBlankLines = lines - displines;
+		if (sVDispBlankLines < 0) sVDispBlankLines = 0;
+		sVDispLines = lines - sVDispBlankLines;
+		if (sVDispLines < 0) sVDispLines = 0;
+	}
 
 	// screen mode print
 	{
@@ -118,13 +134,12 @@ void setup()
 		{
 			byte* p = &sScreenBuffer[6 + ((sScr->mVerticalChars - windowh) >> 1)][0 + ((sScr->mHorizontalChars - windoww) >> 1)];
 			*(p++) = 0xff;
-			*(p++) = (vVsyncCount / 10) + '0';
-			*(p++) = (vVsyncCount % 10) + '0';
+			*(p++) = vVsyncCount2 + '0';
+			*(p++) = vVsyncCount1 + '0';
 			*(p++) = 0xff;
 		}
 	}
 
-	vVsyncCount = 0;
 	pinMode(hPinLED, OUTPUT);
 
 	// disable Timer 0
@@ -160,84 +175,6 @@ void setup()
 	set_sleep_mode(SLEEP_MODE_IDLE);
 }
 
-
-//==============================================================
-// draw a single scan line
-//==============================================================
-
-void doOneScanLine()
-{
-	register byte i;
-	register uint16_t l;
-	const register byte* linePtr;
-	register byte* p;
-
-	// VBack Porch
-	if (vLine >= sVDispEndLine) {
-		if (vLine == sVSyncStartLine) {
-			digitalWrite(hPinVSync, 0);
-		} else if (vLine == sVSyncEndLine) {
-			digitalWrite(hPinVSync, 1);
-		}
-		goto next;
-	}
-
-	// pre-load pointer for speed
-	l = (vLine >> sScr->mLineDoubler);
-	linePtr = &screen_font[l & 0x07][0];
-	l >>= 3;
-	p = &(sScreenBuffer[l][0]);
-
-	if (l >= sScr->mVerticalChars) {
-		goto next;
-	}
-
-	// turn transmitter on
-	UCSR0B = _BV(TXEN0);	// transmit enable (starts transmitting white)
-
-	// how many pixels to send
-	i = sScr->mHorizontalChars;
-
-	// blit pixel data to screen
-	do {
-		register byte* q = linePtr + (*p);
-		register byte c = pgm_read_byte(q);
-		UDR0 = c;
-		(void)pgm_read_byte(q);	// wait
-		p++;
-	} while (--i);
-
-	// wait till done
-	while (!(UCSR0A & _BV(TXC0))) {
-		// blank
-	}
-
-	// disable transmit
-	UCSR0B = 0;		// drop back to black
-
-	// Next Line
-next:;
-	vLine++;
-	if (vLine >= sScr->mVerticalTotalLines) {
-		vLine = 0;
-		vVsyncCount = (vVsyncCount + 1) % 60;
-		byte c = ((vVsyncCount >= 4) ? ' ' : 0xff);
-		{
-			const byte windoww = 4;
-			const byte windowh = 3;
-			byte* p = &sScreenBuffer[6 + ((sScr->mVerticalChars - windowh) >> 1)][0 + ((sScr->mHorizontalChars - windoww) >> 1)];
-			*(p++) = c;
-			*(p++) = (vVsyncCount / 10) + '0';
-			*(p++) = (vVsyncCount % 10) + '0';
-			*(p++) = c;
-		}
-		digitalWrite(hPinLED, (c != ' '));
-	}
-
-
-}	// end of doOneScanLine
-
-
 //==============================================================
 // called by interrupt service routine when incoming data arrives
 //==============================================================
@@ -251,11 +188,136 @@ ISR (TIMER1_OVF_vect) {
 // main loop
 //==============================================================
 
+#define GetScreenBufferPtr() \
+	line = sVDispLines - vHsyncCount;				\
+	l = (line >> sScr->mLineDoubler);				\
+	vScreenFontLine = &screen_font[l & 0x07][0];	\
+	vScreenBufferPtr = &(sScreenBuffer[l>>3][0]);	\
+	\
+
 void loop()
 {
-	// sleep to ensure we start up in a predictable way
+	register uint16_t line;
+	register uint16_t l;
+	register byte* p;
+
+	switch (vHsyncMode) {
+	case 0: // Before Start
+		// VSYNC Start
+		digitalWrite(hPinVSync, 1);
+
+		// Update Display Counter and VSYNC LED
+		{
+			byte c = (((vVsyncCount2 > 0) || (vVsyncCount1 >= 4)) ? ' ' : 0xff);
+			{
+				const byte windoww = 4;
+				const byte windowh = 3;
+				byte* p = &sScreenBuffer[6 + ((sScr->mVerticalChars - windowh) >> 1)][0 + ((sScr->mHorizontalChars - windoww) >> 1)];
+				*(p++) = c;
+				*(p++) = vVsyncCount2 + '0';
+				*(p++) = vVsyncCount1 + '0';
+				*(p++) = c;
+			}
+			digitalWrite(hPinLED, (c != ' '));
+		}
+
+		vHsyncMode = 1;
+		vHsyncCount = sScr->mVerticalSyncLines;
+		break;
+
+	case 1: // Sync Line
+		if (--vHsyncCount == 0) {
+			// VSYNC End
+			digitalWrite(hPinVSync, 0);
+
+			vHsyncMode = 2;
+			vHsyncCount = sScr->mVerticalBackPorch;
+		}
+		break;
+
+	case 2: // Back Porch
+		if (--vHsyncCount == 0) {
+			vHsyncMode = 3;
+			vHsyncCount = sVDispLines;
+
+			GetScreenBufferPtr();
+		}
+		break;
+
+	case 3: // Disp Line
+
+		// blit pixel data to screen
+		{
+			register byte i = sScr->mHorizontalChars;
+			register byte *p = vScreenBufferPtr;
+			register byte* fontline = vScreenFontLine;
+
+			register byte* q = fontline + (*p);
+			register byte c = pgm_read_byte(q);
+
+			// turn transmitter on
+			UCSR0B = _BV(TXEN0);	// transmit enable (starts transmitting white)
+
+			do {
+				UDR0 = c;
+				(void)pgm_read_byte(q);	// wait
+				p++;
+
+				q = fontline + (*p);
+				c = pgm_read_byte(q);
+			} while (--i);
+
+			// wait transmitter done
+			while (!(UCSR0A & _BV(TXC0))) {
+				// blank
+			}
+
+			(void)pgm_read_byte(q);	// wait
+
+			// disable transmit
+			UCSR0B = 0;		// drop back to black
+		}
+
+		if (--vHsyncCount == 0) {
+			if (sVDispBlankLines > 0) {
+				vHsyncMode = 4;
+				vHsyncCount = sVDispBlankLines;
+			} else {
+				vHsyncMode = 5;
+				vHsyncCount = sScr->mVerticalFrontPorch;
+			}
+		} else {
+			GetScreenBufferPtr();
+		}
+
+		break;
+
+	case 4: // Disp Blank Line
+		if (--vHsyncCount == 0) {
+			vHsyncMode = 5;
+			vHsyncCount = sScr->mVerticalFrontPorch;
+		}
+		break;
+
+	case 5: // Front Porch
+		if (--vHsyncCount == 0) {
+			// Update VSYNC Counter
+			vVsyncCount1++;
+			if (vVsyncCount1 >= 10) {
+				vVsyncCount1 = 0;
+				vVsyncCount2++;
+				if (vVsyncCount2 >= 6) {
+					vVsyncCount2 = 0;
+				}
+			}
+
+			vHsyncMode = 0;
+			vHsyncCount = 1;
+		}
+		break;
+	}
+
 	sleep_mode();
-	doOneScanLine();
 }	// end of loop
 
 // [EOF]
